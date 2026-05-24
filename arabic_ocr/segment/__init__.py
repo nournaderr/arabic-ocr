@@ -66,7 +66,7 @@ def segment(binary: np.ndarray) -> list[CharCrop]:
                 # Reassociate dots by x-overlap; small margin catches dots
                 # whose centroid lands just outside the character bounds
                 # (common with ي whose tail extends beyond its dots).
-                dot_margin = max(2, int(ah * 0.25))
+                dot_margin = max(4, int(ah * 0.5))
                 char_dots = [
                     d for d in dot_list
                     if (cx1 - dot_margin) <= d.cx <= (cx2 + dot_margin)

@@ -41,6 +41,8 @@ def segment_paws(
 
     col_proj = np.sum(merged == 0, axis=0)
     candidates = _group_nonzero(col_proj)   # zero columns = word gaps
+    min_paw_w = max(3, int(0.3 * ah))
+    candidates = [(x1, x2) for x1, x2 in candidates if (x2 - x1) >= min_paw_w]
     if not candidates:
         return []
 

@@ -80,10 +80,30 @@ class HMDBCharDataset(Dataset):
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
+# ── Label normalisation ───────────────────────────────────────────────────────
+# Some datasets name the same letter differently (e.g. "Gem" vs "Gen" for ج).
+# Merging these at load time prevents the model from trying to learn
+# visually-identical classes as separate outputs.
+_LABEL_MERGES: dict[str, str] = {
+    # Gem_* and Gen_* are both ج (Jeem) — Egyptian "G" vs MSA "J" pronunciation.
+    # Merge all Gem_* into Gen_* since Gen has more training samples.
+    "Gem_Isolated": "Gen_Isolated",
+    "Gem_Start":    "Gen_Start",
+    "Gem_Middle":   "Gen_Middle",
+    "Gem_End":      "Gen_End",
+}
+
+
+def _normalize_label(label: str) -> str:
+    return _LABEL_MERGES.get(label, label)
+
+
 def load_dataset(data_dir: Path) -> tuple[np.ndarray, list[str]]:
     """Walk data_dir and return (normalised_image_array, label_list).
 
     Prints a loading summary with Unicode glyphs where known.
+    Labels are normalised via _normalize_label() to merge visually-identical
+    duplicate classes (e.g. Gem_* → Gen_* for ج).
     """
     raw_imgs, ys = [], []
 
@@ -92,9 +112,11 @@ def load_dataset(data_dir: Path) -> tuple[np.ndarray, list[str]]:
         raise FileNotFoundError(f"No subdirectories in {data_dir}")
 
     for folder in folders:
-        label = folder.name
+        raw_label = folder.name
+        label     = _normalize_label(raw_label)
         loaded = 0
-        for img_path in sorted(folder.glob("*.png")):
+        img_paths = sorted(folder.glob("*.png")) + sorted(folder.glob("*.jpg")) + sorted(folder.glob("*.jpeg"))
+        for img_path in img_paths:
             img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
             if img is None:
                 continue
@@ -103,9 +125,10 @@ def load_dataset(data_dir: Path) -> tuple[np.ndarray, list[str]]:
             loaded += 1
 
         if loaded:
-            glyph = hmdb_label_to_unicode(label)
+            merged = f" → {label}" if label != raw_label else ""
+            glyph  = hmdb_label_to_unicode(label)
             display = f" ({glyph})" if glyph else ""
-            print(f"  {label}{display}: {loaded}")
+            print(f"  {raw_label}{merged}{display}: {loaded}")
 
     if not raw_imgs:
         raise RuntimeError(f"No PNG images found under {data_dir}")

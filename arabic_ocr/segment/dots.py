@@ -37,10 +37,12 @@ def separate_dots(
         area = stats[lbl, cv2.CC_STAT_AREA]
         cx, cy = centroids[lbl]
 
+        aspect = h / (w + 1e-5)
         is_dot = (
-            h   < 0.4 * ah and
-            w   < 0.4 * ah and
-            area < 0.15 * ah * ah
+            h    < 0.4 * ah and
+            w    < 0.4 * ah and
+            area < 0.15 * ah * ah and
+            0.25 <= aspect <= 4.0   # reject thin ligature slivers
         )
         if is_dot:
             body[labels == lbl] = 0  # erase dot from body
@@ -62,7 +64,9 @@ def _estimate_baseline(stats, labels, num_labels, ah) -> float:
         area = stats[lbl, cv2.CC_STAT_AREA]
         top  = stats[lbl, cv2.CC_STAT_TOP]
         w    = stats[lbl, cv2.CC_STAT_WIDTH]
-        if not (h < 0.4 * ah and w < 0.4 * ah and area < 0.15 * ah * ah):
+        aspect = h / (w + 1e-5)
+        if not (h < 0.4 * ah and w < 0.4 * ah and area < 0.15 * ah * ah
+                and 0.25 <= aspect <= 4.0):
             bottoms.append(top + h)
     if not bottoms:
         return float(labels.shape[0]) * 0.75
@@ -75,30 +79,42 @@ def _cluster_dots(
     baseline_y: float,
     cluster_radius: float,
 ) -> list[Dot]:
-    """Group nearby raw dot centroids into Dot objects."""
+    """Group nearby raw dot centroids into Dot objects using union-find.
+
+    Union-find gives correct transitive clustering: if A-B and B-C are within
+    radius, all three merge even if A-C are not. The previous seed-only greedy
+    loop would leave C isolated, breaking ث/ش (3-dot letters) whenever the
+    outer dots are spaced beyond cluster_radius from the seed.
+    """
     if not raw_dots:
         return []
 
-    used = [False] * len(raw_dots)
+    n = len(raw_dots)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if np.hypot(raw_dots[i][0] - raw_dots[j][0],
+                        raw_dots[i][1] - raw_dots[j][1]) <= cluster_radius:
+                ri, rj = find(i), find(j)
+                if ri != rj:
+                    parent[ri] = rj
+
+    groups: dict[int, list[tuple[float, float]]] = {}
+    for i, pt in enumerate(raw_dots):
+        groups.setdefault(find(i), []).append(pt)
+
     clusters: list[Dot] = []
-
-    for i, (cx_i, cy_i) in enumerate(raw_dots):
-        if used[i]:
-            continue
-        group = [(cx_i, cy_i)]
-        used[i] = True
-        for j, (cx_j, cy_j) in enumerate(raw_dots):
-            if used[j]:
-                continue
-            dist = np.hypot(cx_i - cx_j, cy_i - cy_j)
-            if dist <= cluster_radius:
-                group.append((cx_j, cy_j))
-                used[j] = True
-
+    for group in groups.values():
         mean_cx = float(np.mean([p[0] for p in group]))
         mean_cy = float(np.mean([p[1] for p in group]))
         position = "above" if mean_cy < baseline_y else "below"
         clusters.append(Dot(cx=mean_cx, cy=mean_cy,
                             cluster_size=len(group), position=position))
-
     return clusters

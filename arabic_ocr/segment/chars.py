@@ -1,6 +1,4 @@
 import numpy as np
-from scipy.signal import argrelmin
-from itertools import combinations
 
 from arabic_ocr.config import (
     AH_HEIGHT_MIN, AH_HEIGHT_MAX,
@@ -48,15 +46,30 @@ def segment_chars(
     if w < 2 or col_proj.max() == 0:
         return [(paw_x, paw_y, paw_x + w, paw_y + h)]
 
-    # Local minima in column projection
-    order = max(1, int(0.05 * w))
-    min_indices = list(argrelmin(col_proj, order=order)[0])
-
+    # Find valleys as midpoints of contiguous low-ink regions.
+    # argrelmin requires a strict local minimum and misses plateau connections
+    # (multiple equal-value columns at a tatweel junction) — a common pattern
+    # in printed Naskh where argrelmin finds no valley even when the ink drops
+    # to near-zero across several adjacent columns.
     local_max = np.percentile(col_proj[col_proj > 0], 90) if col_proj.any() else 1.0
-    valleys = [
-        idx for idx in min_indices
-        if col_proj[idx] < CHOP_MIN_VALLEY * local_max
-    ]
+    threshold = CHOP_MIN_VALLEY * local_max
+    # Minimum gap width: 2px minimum — Naskh inter-character joins are often
+    # only 2-4px wide, so a percentage-based floor (0.03*w ≈ 9px) misses them.
+    min_gap_w = 2
+
+    valleys: list[int] = []
+    in_gap = False
+    gap_start = 0
+    for i, v in enumerate(col_proj):
+        if v < threshold and not in_gap:
+            gap_start = i
+            in_gap = True
+        elif v >= threshold and in_gap:
+            if (i - gap_start) >= min_gap_w:
+                valleys.append((gap_start + i - 1) // 2)
+            in_gap = False
+    if in_gap and (w - gap_start) >= min_gap_w:
+        valleys.append((gap_start + w - 1) // 2)
 
     if not valleys:
         return [(paw_x, paw_y, paw_x + w, paw_y + h)]
@@ -112,32 +125,44 @@ def _best_segmentation(
     paw_h: int,
     paw_w: int,
 ) -> list[int]:
-    """Choose the cut set that maximises valid character segments."""
-    best_score = -1
-    best_cuts = [0, paw_w]
+    """Choose the cut set that maximises valid character segments (DP, O(n²)).
 
-    # Enumerate all subsets of internal cuts; limit search for performance
-    internal = cuts[1:-1]
-    if len(internal) > 10:
-        internal = internal[:10]
+    Unlike the previous exhaustive 2^n search capped at 10 internal cuts, this
+    DP evaluates every pair of cut positions in O(n²) time and is therefore not
+    limited by the number of valley candidates.
+    """
+    n = len(cuts)
+    if n <= 2:
+        return cuts
 
-    for r in range(len(internal) + 1):
-        for subset in combinations(range(len(internal)), r):
-            chosen = [0] + [internal[i] for i in subset] + [paw_w]
-            score = sum(
-                1 for a, b in zip(chosen[:-1], chosen[1:])
-                if _valid_char(paw_binary[:, a:b], ah)
-            )
-            # Prefer higher score; break ties by choosing more segments
-        # (more cuts = better for multi-character PAWs where some segments
-        # are valid and others are not yet correctly sized).
-        if score > best_score or (
-            score == best_score and len(chosen) > len(best_cuts)
-        ):
-                best_score = score
-                best_cuts = chosen
+    # dp[i] = (best_valid_count, n_segments_so_far, prev_cut_index)
+    # Initialise with sentinel (-1, 0, -1) meaning "not reachable".
+    dp: list[tuple[int, int, int]] = [(-1, 0, -1)] * n
+    dp[0] = (0, 0, -1)
 
-    return best_cuts
+    for i in range(1, n):
+        for j in range(i):
+            if dp[j][0] < 0:
+                continue
+            valid = _valid_char(paw_binary[:, cuts[j]:cuts[i]], ah)
+            score = dp[j][0] + (1 if valid else 0)
+            segs  = dp[j][1] + 1
+            # Primary: maximise valid-char count; tie-break: fewer segments (avoids slivers).
+            if score > dp[i][0] or (score == dp[i][0] and segs < dp[i][1]):
+                dp[i] = (score, segs, j)
+
+    # If no valid character was ever found, return the whole PAW unsplit.
+    if dp[n - 1][0] <= 0:
+        return [0, paw_w]
+
+    # Backtrack through the DP table.
+    path: list[int] = []
+    i = n - 1
+    while i >= 0:
+        path.append(cuts[i])
+        i = dp[i][2]
+
+    return sorted(path)
 
 
 def _estimate_ah(line_binary: np.ndarray) -> float:

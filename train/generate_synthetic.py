@@ -54,7 +54,7 @@ _MISSING_FORMS = {
     "Tah_End":     "ـط",    # ط final
     "Zah_Start":   "ظـ",    # ظ initial
     "Zah_End":     "ـظ",    # ظ final
-    "Gem_Middle":  "ـجـ",   # ج medial (Gem variant)
+    "Gen_Middle":  "ـجـ",   # ج medial (was Gem_Middle — merged at train time)
     "Gen_Start":   "جـ",    # ج initial (Gen variant)
 }
 
