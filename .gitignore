@@ -31,7 +31,7 @@ models/langmodel/bigrams.json
 
 # Training data — the chars/ folder is large (100k+ images)
 # Keep test_images and corpus in version control.
-data/chars/
+data/*
 
 # Debug / intermediate pipeline outputs
 output/debug/
