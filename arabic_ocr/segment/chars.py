@@ -287,34 +287,6 @@ def _valid_char(crop: np.ndarray, ah: float) -> bool:
     )
 
 
-def _cut_quality(paw_binary: np.ndarray, cut_x: int, ah: float) -> float:
-    """Score how plausible a cut at `cut_x` looks.
-
-    A good inter-character cut tends to have a thin vertical ink span and low
-    local ink density. Cuts that pass through a tall letter body receive a
-    lower score, which helps avoid chopping bowl-shaped letters in half.
-    """
-    h, w = paw_binary.shape
-    half_w = max(1, int(round(0.08 * ah)))
-    x1 = max(0, cut_x - half_w)
-    x2 = min(w, cut_x + half_w + 1)
-    window = paw_binary[:, x1:x2]
-    if not np.any(window == 0):
-        return 1.0
-
-    ink_rows = np.where(np.any(window == 0, axis=1))[0]
-    if ink_rows.size == 0:
-        return 1.0
-
-    tight_h = float(ink_rows[-1] - ink_rows[0] + 1)
-    density = float(np.mean(window == 0))
-
-    # Smaller is better; convert to a bounded quality score in [0, 1].
-    span_penalty = min(1.0, tight_h / max(1.0, 0.75 * ah))
-    density_penalty = min(1.0, density / 0.28)
-    return max(0.0, 1.0 - 0.7 * span_penalty - 0.3 * density_penalty)
-
-
 def _best_segmentation(
     paw_binary: np.ndarray,
     cuts: list[int],
@@ -332,10 +304,6 @@ def _best_segmentation(
     if n <= 2:
         return cuts
 
-    cut_quality = [0.0] * n
-    for i in range(1, n - 1):
-        cut_quality[i] = _cut_quality(paw_binary, cuts[i], ah)
-
     # dp[i] = (best_valid_count, n_segments_so_far, prev_cut_index)
     # Initialise with sentinel (-1, 0, -1) meaning "not reachable".
     dp: list[tuple[int, int, int]] = [(-1, 0, -1)] * n
@@ -351,11 +319,9 @@ def _best_segmentation(
             # Primary: maximise valid-char count. Secondary: discourage many segments
             # by penalising the number of segments in the effective score. This
             # helps avoid over-segmentation when several low-quality cuts exist.
-            # Prefer cuts that look like thin inter-character joins rather than
-            # tall letter bodies.
-            cut_bonus = cut_quality[i] * 35.0 if i < n - 1 else 0.0
-            effective = score * 100 - segs * 14 + cut_bonus
-            current_effective = dp[i][0] * 100 - dp[i][1] * 14 if dp[i][0] >= 0 else -10_000
+            # Compute an effective score for comparison.
+            effective = score * 100 - segs * 12
+            current_effective = dp[i][0] * 100 - dp[i][1] * 12 if dp[i][0] >= 0 else -10_000
             if effective > current_effective:
                 dp[i] = (score, segs, j)
 

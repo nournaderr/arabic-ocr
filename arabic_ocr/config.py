@@ -25,7 +25,7 @@ AH_HEIGHT_MAX   = 2.0
 MIN_CHAR_WIDTH  = 0.1
 MAX_CHAR_WIDTH  = 3.0
 AH_AREA_MIN     = 0.05
-CHOP_MIN_VALLEY = 0.62  # valley must be below this fraction of local max
+CHOP_MIN_VALLEY = 0.70  # valley must be below this fraction of local max
 
 # ── Features ──────────────────────────────────────────────────────────────────
 NORM_SIZE       = 32
