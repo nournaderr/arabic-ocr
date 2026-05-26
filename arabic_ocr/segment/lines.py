@@ -56,7 +56,10 @@ def segment_lines(
 
     # Merge bands separated by a small gap — a slight dip in the projection
     # (e.g. at a lam-alef junction) can split one text line into two bands.
-    lines = _merge_close_lines(lines, binary, gap_threshold=int(0.5 * estimated_ah))
+    # Use a more conservative merge threshold to avoid joining distinct
+    # text lines when the estimated average character height is large
+    # (caused e.g. by thickening during preprocessing).
+    lines = _merge_close_lines(lines, binary, gap_threshold=max(1, int(0.25 * estimated_ah)))
 
     return lines  # already top-to-bottom
 

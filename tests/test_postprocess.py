@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from types import SimpleNamespace
 
 from arabic_ocr.postprocess.language_model import ArabicLanguageModel
 from arabic_ocr.postprocess.viterbi import viterbi_decode
@@ -103,6 +104,23 @@ class TestLanguageModel:
         lm.train_from_text("بيت بيت بيت")
         assert lm._loaded_bigrams
         assert lm.bigrams["ب"]["ي"] > 0
+
+
+class TestPostprocessUnicodeLabels:
+    def test_plain_unicode_candidates_survive_postprocess(self):
+        lm = ArabicLanguageModel.__new__(ArabicLanguageModel)
+        from collections import defaultdict
+        lm.bigrams = defaultdict(lambda: defaultdict(float))
+        lm._loaded_bigrams = False
+        lm._dawg_root = None
+
+        crop = SimpleNamespace(
+            line_idx=0,
+            paw_idx=0,
+            candidates=[("ب", 0.9), ("ت", 0.1)],
+        )
+
+        assert postprocess([crop], lm) == "ب"
 
 
 # ── DAWG ──────────────────────────────────────────────────────────────────────

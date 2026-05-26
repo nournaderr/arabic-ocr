@@ -7,6 +7,7 @@ def beam_search_decode(
     candidates_per_position: list[list[tuple[str, float]]],
     lm,
     beam_width: int = 5,
+    return_beams: bool = False,
 ) -> list[str]:
     """Beam search decoding over per-position top-K candidate lists.
 
@@ -48,4 +49,9 @@ def beam_search_decode(
         new_beams.sort(key=lambda t: t[0], reverse=True)
         beams = new_beams[:beam_width]
 
-    return beams[0][1] if beams else []
+    if not beams:
+        return [] if not return_beams else []
+    # beams are sorted by score desc
+    if return_beams:
+        return beams
+    return beams[0][1]

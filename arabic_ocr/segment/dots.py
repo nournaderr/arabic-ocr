@@ -31,27 +31,74 @@ def separate_dots(
     body = inverted.copy()
     raw_dots: list[tuple[float, float]] = []
 
+    # Gather statistics for adaptive thresholds
+    heights = []
+    widths = []
+    areas = []
     for lbl in range(1, num_labels):
-        h   = stats[lbl, cv2.CC_STAT_HEIGHT]
-        w   = stats[lbl, cv2.CC_STAT_WIDTH]
+        h = stats[lbl, cv2.CC_STAT_HEIGHT]
+        w = stats[lbl, cv2.CC_STAT_WIDTH]
+        area = stats[lbl, cv2.CC_STAT_AREA]
+        heights.append(h)
+        widths.append(w)
+        areas.append(area)
+
+    heights = np.array(heights) if heights else np.array([ah])
+    widths = np.array(widths) if widths else np.array([ah])
+    areas = np.array(areas) if areas else np.array([ah * ah])
+
+    # Adaptive thresholds based on component size distribution and ah
+    # Use lower percentiles so dots are detected relative to small components
+    h_thresh = max(1.0, min(0.6 * ah, float(np.percentile(heights, 25) * 1.25)))
+    w_thresh = max(1.0, min(0.6 * ah, float(np.percentile(widths, 25) * 1.25)))
+    area_thresh = max(1.0, min(0.2 * ah * ah, float(np.percentile(areas, 25) * 1.5)))
+    aspect_min, aspect_max = 0.2, 6.0
+
+    # Detection rule: accept components that are small relative to ah OR have small area.
+    # This OR rule helps capture both tiny ink dots and slightly larger bolder dots.
+    candidate_lbls = set()
+    max_dot_dim = max(2.0, 0.6 * ah)
+    for lbl in range(1, num_labels):
+        h = stats[lbl, cv2.CC_STAT_HEIGHT]
+        w = stats[lbl, cv2.CC_STAT_WIDTH]
         area = stats[lbl, cv2.CC_STAT_AREA]
         cx, cy = centroids[lbl]
-
         aspect = h / (w + 1e-5)
-        is_dot = (
-            h    < 0.4 * ah and
-            w    < 0.4 * ah and
-            area < 0.15 * ah * ah and
-            0.25 <= aspect <= 4.0   # reject thin ligature slivers
-        )
-        if is_dot:
-            body[labels == lbl] = 0  # erase dot from body
-            raw_dots.append((cx, cy))
+        small_dim = max(h, w) <= max_dot_dim
+        small_area = area <= area_thresh
+        # Require both small dimension and small area to reduce false positives from stroke fragments.
+        if not (small_dim and small_area):
+            continue
+        if not (aspect_min <= aspect <= aspect_max):
+            continue
+        # Reject components that clearly touch other ink in their bbox (likely stroke fragments)
+        left = int(stats[lbl, cv2.CC_STAT_LEFT])
+        top = int(stats[lbl, cv2.CC_STAT_TOP])
+        bw = int(stats[lbl, cv2.CC_STAT_WIDTH])
+        bh = int(stats[lbl, cv2.CC_STAT_HEIGHT])
+        # extract bbox from inverted image and labels
+        inv_bbox = inverted[top:top+bh, left:left+bw]
+        lbl_bbox = labels[top:top+bh, left:left+bw]
+        # other ink pixels within bbox that are not part of this component
+        other_ink = np.any((inv_bbox > 0) & (lbl_bbox != lbl))
+        if other_ink:
+            continue
+        candidate_lbls.add(lbl)
+
+    for lbl in sorted(candidate_lbls):
+        body[labels == lbl] = 0  # erase dot from body
+        cx, cy = centroids[lbl]
+        raw_dots.append((cx, cy))
 
     body_binary = cv2.bitwise_not(body)
 
     # Cluster nearby dots (within 0.5*ah)
     dot_list = _cluster_dots(raw_dots, baseline_y, cluster_radius=0.5 * ah)
+
+    # Log if unusually many dots were found (likely over-detection)
+    if len(dot_list) > 8:
+        import logging
+        logging.getLogger(__name__).warning("Unusually many dots detected: %d", len(dot_list))
 
     return body_binary, dot_list
 

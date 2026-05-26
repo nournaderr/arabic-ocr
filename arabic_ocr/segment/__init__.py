@@ -7,7 +7,7 @@ import numpy as np
 from .lines import segment_lines
 from .paws import segment_paws
 from .dots import separate_dots, Dot
-from .chars import segment_chars, _estimate_ah
+from .chars import segment_chars_with_fallback as segment_chars, _estimate_ah
 
 
 @dataclass
@@ -40,6 +40,12 @@ def segment(binary: np.ndarray) -> list[CharCrop]:
             body_img, dot_list = separate_dots(paw_img, ah)
             char_boxes = segment_chars(body_img, px1, ly1, ah)
 
+            # Safety: ensure each PAW yields at least one character box. If
+            # segmentation returned no boxes (shouldn't happen), fall back to
+            # a single box covering the entire PAW so words are not dropped.
+            if not char_boxes:
+                char_boxes = [(px1, ly1, px2, ly2)]
+
             # Assign position tags (initial/medial/final/isolated)
             n_chars = len(char_boxes)
             for char_idx, (cx1, cy1, cx2, cy2) in enumerate(char_boxes):
@@ -63,15 +69,32 @@ def segment(binary: np.ndarray) -> list[CharCrop]:
 
                 pos = _position_tag(char_idx, n_chars)
 
-                # Reassociate dots by x-overlap; small margin catches dots
-                # whose centroid lands just outside the character bounds
-                # (common with ي whose tail extends beyond its dots).
-                dot_margin = max(4, int(ah * 0.5))
-                char_dots = [
-                    d for d in dot_list
-                    if (cx1 - dot_margin) <= d.cx <= (cx2 + dot_margin)
-                ]
+                # Reassociate dots to characters by nearest horizontal distance.
+                # Convert dot centroids (paw-local) to absolute coordinates
+                # before measuring distance against absolute character boxes.
+                char_dots = []
+                if dot_list:
+                    # compute average char width to set a reasonable attachment threshold
+                    avg_w = int(np.mean([bb[2] - bb[0] for bb in char_boxes]) if char_boxes else max(1, int(ah)))
+                    attach_thresh = max(4, int(0.7 * avg_w))
+                    # assign each dot to the nearest character center if within threshold
+                    char_centers = [((b[0] + b[2]) / 2.0) for b in char_boxes]
+                    assigned = {i: [] for i in range(len(char_boxes))}
+                    for d in dot_list:
+                        dot_abs_x = px1 + d.cx
+                        # find nearest character center
+                        if not char_centers:
+                            continue
+                        distances = [abs(dot_abs_x - cc) for cc in char_centers]
+                        nearest = int(np.argmin(distances))
+                        if distances[nearest] <= attach_thresh:
+                            assigned[nearest].append(d)
+                    # build list for this char index in the loop below by matching index
+                else:
+                    assigned = {}
 
+                # fetch assigned dots for this char index if available
+                c_dots = assigned.get(char_idx, []) if assigned else [d for d in dot_list if (cx1 - max(4, int(ah*0.5))) <= (px1 + d.cx) <= (cx2 + max(4, int(ah*0.5)))]
                 all_chars.append(CharCrop(
                     img=char_crop_img,
                     abs_x=cx1,
@@ -79,7 +102,7 @@ def segment(binary: np.ndarray) -> list[CharCrop]:
                     line_idx=line_idx,
                     paw_idx=paw_idx,
                     char_idx=char_idx,
-                    dots=char_dots,
+                    dots=c_dots,
                     position=pos,
                 ))
 

@@ -35,9 +35,6 @@ _FONT_CANDIDATES = [
     "DTNASKH4.TTF",
     "trado.ttf",      # Traditional Arabic
     "tradbdo.ttf",    # Traditional Arabic Bold
-    "arabtype.ttf",   # Arabic Typesetting
-    "Candarab.ttf",   # Candara Arabic
-    "ARABSQ.TTF",
 ]
 
 # Render sizes — variety forces size-invariant features
@@ -54,8 +51,10 @@ _MISSING_FORMS = {
     "Tah_End":     "ـط",    # ط final
     "Zah_Start":   "ظـ",    # ظ initial
     "Zah_End":     "ـظ",    # ظ final
-    "Gen_Middle":  "ـجـ",   # ج medial (was Gem_Middle — merged at train time)
-    "Gen_Start":   "جـ",    # ج initial (Gen variant)
+    "Gem_Middle":  "ـجـ",   # ج medial
+    "Gen_Middle":  "ـغـ",   # غ medial
+    "Gem_Start":   "جـ",    # ج initial
+    "Gen_Start":   "غـ",    # غ initial
 }
 
 

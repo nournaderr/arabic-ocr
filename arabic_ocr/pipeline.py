@@ -5,15 +5,21 @@ from arabic_ocr.preprocess import preprocess
 from arabic_ocr.segment import segment, CharCrop
 from arabic_ocr.classifiers import get_classifier, BaseClassifier
 from arabic_ocr.postprocess import ArabicLanguageModel, postprocess
+from arabic_ocr.postprocess.reranker import RERANKER
 from arabic_ocr.utils.image_io import load_image, resize_if_large
 from arabic_ocr.utils.arabic_utils import (
     filter_candidates_by_position,
     filter_candidates_by_dots,
 )
+from arabic_ocr.utils import arabic_utils as _au
+from arabic_ocr import config as cfg
 from arabic_ocr.utils.visualize import (
     draw_lines, draw_paws, draw_chars, draw_dots, save_debug_visualization,
 )
 from arabic_ocr.config import OUTPUT_DIR
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ArabicOCRPipeline:
@@ -79,16 +85,26 @@ class ArabicOCRPipeline:
         # Stage 3 — classify (batch for efficiency)
         imgs      = [c.img  for c in char_crops]
         dot_lists = [c.dots for c in char_crops]
-        all_candidates = self.classifier.predict_batch(imgs, dot_lists)
+        try:
+            all_candidates = self.classifier.predict_batch(imgs, dot_lists)
+        except Exception:
+            logger.exception("Classifier.predict_batch failed — falling back to undetected candidates")
+            # Provide a safe default: one undetected candidate per position.
+            all_candidates = [[("", 1.0)] for _ in imgs]
+
+        # Truncate or extend with defaults so we always have one list per crop
+        if len(all_candidates) != len(char_crops):
+            logger.warning("Classifier returned %d candidate lists for %d crops; normalising.",
+                           len(all_candidates), len(char_crops))
+            all_candidates = list(all_candidates[:len(char_crops)])
+            while len(all_candidates) < len(char_crops):
+                all_candidates.append([("", 1.0)])
+
+        # Assign candidates to each CharCrop and apply the reranker (learned or heuristic)
+        from arabic_ocr.features.dot_features import dot_features
         for crop, cands in zip(char_crops, all_candidates):
-            # Restrict to correct positional-form classes (free boost for HMDB labels).
-            filtered = filter_candidates_by_position(cands, crop.position)
-            # Hard-constrain by observed dot count: if we see N dots above/below,
-            # only keep candidates whose letter name expects exactly that count.
-            # Skipped when no dots detected (dot might have been missed).
-            dots_above = sum(d.cluster_size for d in crop.dots if d.position == "above")
-            dots_below = sum(d.cluster_size for d in crop.dots if d.position == "below")
-            crop.candidates = filter_candidates_by_dots(filtered, dots_above, dots_below)
+            df = dot_features(crop.dots)
+            crop.candidates = RERANKER.rerank(cands, df.tolist())
 
         # Stage 4 — postprocess
         return postprocess(char_crops, self.lm)
@@ -133,3 +149,50 @@ class ArabicOCRPipeline:
                                  "chars", debug_dir)
         save_debug_visualization(draw_dots(binary, all_dots),
                                  "dots", debug_dir)
+
+
+def _filter_candidates_with_fallback(
+    candidates: list[tuple[str, float]],
+    position: str,
+    dots_above: int,
+    dots_below: int,
+) -> list[tuple[str, float]]:
+    """Apply positional and dot filters, but keep the original candidates if all are removed."""
+    # Apply position filter first (strict): keeps only matching positional forms
+    filtered = filter_candidates_by_position(candidates, position)
+
+    # Re-rank by dot agreement rather than strictly filtering so LM can still
+    # correct ambiguous cases. Boost candidates whose expected dot counts
+    # match the observed dots; penalise those that explicitly disagree.
+    observed = (dots_above, dots_below)
+    boost = getattr(cfg, "DOT_RERANK_BOOST", 0.20)
+    penalty = getattr(cfg, "DOT_RERANK_PENALTY", 0.10)
+
+    def expected_for_label(label: str):
+        base = label.rsplit("_", 1)[0]
+        return _au._LETTER_DOT_COUNTS.get(base)
+
+    reranked = []
+    for label, conf in filtered:
+        expected = expected_for_label(label)
+        new_conf = conf
+        if expected is not None:
+            if expected == observed:
+                new_conf = conf + boost
+            else:
+                # if we observed no dots but candidate expects dots, penalise
+                new_conf = max(0.0, conf - penalty)
+        reranked.append((label, new_conf))
+
+    # Keep original ordering for equal scores; sort by adjusted confidence
+    reranked.sort(key=lambda t: t[1], reverse=True)
+
+    # If dot filtering would have returned empty (no sensible matches), fall back
+    # to the original candidate list; otherwise return reranked top list but keep
+    # the same length as input filtered list.
+    if not reranked:
+        return candidates
+    # Normalize confidences to sum to 1 for downstream expectations
+    total = sum(c for _, c in reranked) or 1.0
+    normalized = [(lab, c / total) for lab, c in reranked]
+    return normalized

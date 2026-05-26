@@ -29,7 +29,9 @@ def segment_paws(
     Returns list of (x1, x2, paw_crop) sorted RIGHT-TO-LEFT (descending x1).
     """
     h, w = line_binary.shape
-    dil_width = max(3, int(0.3 * ah))
+    # Dilate proportionally to average character height so intra-word gaps
+    # are closed consistently across scales. Clamp to at least 1 pixel.
+    dil_width = max(1, int(round(0.25 * ah)))
 
     # Dilate text blobs horizontally to close intra-word gaps.
     # cv2.dilate expands bright regions, so we work on the inverted image
@@ -41,16 +43,19 @@ def segment_paws(
 
     col_proj = np.sum(merged == 0, axis=0)
     candidates = _group_nonzero(col_proj)   # zero columns = word gaps
-    min_paw_w = max(3, int(0.3 * ah))
+    min_paw_w = max(1, int(round(0.3 * ah)))
     candidates = [(x1, x2) for x1, x2 in candidates if (x2 - x1) >= min_paw_w]
     if not candidates:
-        return []
+        return [(0, w, line_binary)]
 
     result = []
     for px1, px2 in candidates:
         crop = line_binary[:, px1:px2]
         if crop.shape[1] > 0:
             result.append((px1, px2, crop))
+
+    if not result:
+        return [(0, w, line_binary)]
 
     # Sort right-to-left (Arabic reading order)
     result.sort(key=lambda t: t[0], reverse=True)

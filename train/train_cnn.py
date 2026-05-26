@@ -81,16 +81,16 @@ class HMDBCharDataset(Dataset):
 # ── Data loading ──────────────────────────────────────────────────────────────
 
 # ── Label normalisation ───────────────────────────────────────────────────────
-# Some datasets name the same letter differently (e.g. "Gem" vs "Gen" for ج).
+# Some datasets name the same letter differently.
 # Merging these at load time prevents the model from trying to learn
 # visually-identical classes as separate outputs.
 _LABEL_MERGES: dict[str, str] = {
-    # Gem_* and Gen_* are both ج (Jeem) — Egyptian "G" vs MSA "J" pronunciation.
-    # Merge all Gem_* into Gen_* since Gen has more training samples.
-    "Gem_Isolated": "Gen_Isolated",
-    "Gem_Start":    "Gen_Start",
-    "Gem_Middle":   "Gen_Middle",
-    "Gem_End":      "Gen_End",
+    # Ta_Marbuta vs Teh_Marbuta
+    "Ta_Marbuta_Isolated": "Teh_Marbuta_Isolated",
+    "Ta_Marbuta_End":      "Teh_Marbuta_End",
+    
+    # Alef Hamza variants
+    "Alef_Hamza_Isolated": "Alef_Hamza_Above_Isolated",
 }
 
 
@@ -103,7 +103,7 @@ def load_dataset(data_dir: Path) -> tuple[np.ndarray, list[str]]:
 
     Prints a loading summary with Unicode glyphs where known.
     Labels are normalised via _normalize_label() to merge visually-identical
-    duplicate classes (e.g. Gem_* → Gen_* for ج).
+    duplicate classes.
     """
     raw_imgs, ys = [], []
 
@@ -145,7 +145,8 @@ def main():
     )
     parser.add_argument("--data-dir",   default=str(DATA_DIR / "chars"))
     parser.add_argument("--out",        default=str(MODELS_DIR / "cnn" / "model.pt"))
-    parser.add_argument("--epochs",     type=int,   default=40)
+    parser.add_argument("--epochs",     type=int,   default=40, help="Max maximum epochs")
+    parser.add_argument("--target-acc", type=float, default=None, help="Target validation accuracy to stop early (e.g. 0.95)")
     parser.add_argument("--batch-size", type=int,   default=64)
     parser.add_argument("--lr",         type=float, default=1e-3)
     parser.add_argument("--test-split", type=float, default=0.10)
@@ -181,6 +182,12 @@ def main():
     clf.classes_ = enc.classes_
     clf.model    = clf._build_model()
 
+    # Move model to GPU if available
+    import torch
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    clf.model.to(device)
+
     opt       = torch.optim.Adam(clf.model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     criterion = nn.CrossEntropyLoss()
@@ -192,12 +199,19 @@ def main():
         # ── Train ────────────────────────────────────────────────────────────
         clf.model.train()
         train_loss = 0.0
-        for xb, db, yb in train_loader:
+        for batch_idx, (xb, db, yb) in enumerate(train_loader):
+            xb, db, yb = xb.to(device), db.to(device), yb.to(device)
+            
             opt.zero_grad()
             loss = criterion(clf.model(xb, db), yb)
             loss.backward()
             opt.step()
             train_loss += loss.item() * len(yb)
+            
+            # Print progress every 500 batches so it doesn't look frozen
+            if (batch_idx + 1) % 500 == 0:
+                print(f"  Epoch {epoch} | Batch {batch_idx + 1}/{len(train_loader)} | Loss: {loss.item():.4f}")
+                
         scheduler.step()
         train_loss /= len(X_tr)
 
@@ -207,11 +221,14 @@ def main():
         all_preds, all_true = [], []
         with torch.no_grad():
             for xb, db, yb in val_loader:
+                xb, db, yb = xb.to(device), db.to(device), yb.to(device)
                 preds = clf.model(xb, db).argmax(dim=1)
+                
+                # Move back to CPU for metrics
                 correct      += (preds == yb).sum().item()
                 total        += len(yb)
-                all_preds.extend(preds.numpy())
-                all_true.extend(yb.numpy())
+                all_preds.extend(preds.cpu().numpy())
+                all_true.extend(yb.cpu().numpy())
 
         acc = correct / total
         print(f"Epoch {epoch:3d}/{args.epochs}  loss={train_loss:.4f}  val_acc={acc:.4f}")
@@ -221,6 +238,10 @@ def main():
             best_epoch = epoch
             clf.save(Path(args.out))
             print(f"  → checkpoint saved (acc={best_acc:.4f})")
+            
+        if args.target_acc is not None and acc >= args.target_acc:
+            print(f"\nReached target accuracy {args.target_acc} (Current: {acc:.4f}). Stopping early!")
+            break
 
     print(f"\nBest val accuracy: {best_acc:.4f} at epoch {best_epoch}")
 

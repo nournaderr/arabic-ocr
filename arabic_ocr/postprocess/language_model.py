@@ -6,6 +6,7 @@ from typing import Optional
 import numpy as np
 
 from arabic_ocr.config import BIGRAM_WEIGHT, DAWG_BOOST, MODELS_DIR
+from arabic_ocr.config import WORD_FREQ_FILE, WORD_FREQ_BOOST
 
 
 class ArabicLanguageModel:
@@ -33,6 +34,10 @@ class ArabicLanguageModel:
             self.load_bigrams(Path(bp))
         if Path(dp).exists():
             self.load_dawg(Path(dp))
+        # Optional word frequency file (word -> count)
+        wf = WORD_FREQ_FILE
+        if Path(wf).exists():
+            self.load_word_freq(Path(wf))
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
@@ -80,8 +85,29 @@ class ArabicLanguageModel:
 
     def rescore_word(self, word: str, clf_conf: float) -> float:
         """Return boosted confidence if word is in the Arabic lexicon."""
-        boost = DAWG_BOOST if self._in_lexicon(word) else 0.0
+        boost = 0.0
+        if self._in_lexicon(word):
+            boost += DAWG_BOOST
+        # Add word-frequency based boost (normalised using log scale)
+        if getattr(self, "_word_freq", None):
+            maxf = float(self._max_word_freq or 1)
+            f = float(self._word_freq.get(word, 0))
+            # Log-frequency is vastly better for words due to Zipf's law
+            freq_norm = float(np.log(f + 1) / np.log(maxf + 1)) if maxf > 0 else 0.0
+            boost += WORD_FREQ_BOOST * freq_norm
         return clf_conf + boost
+
+    def load_word_freq(self, path: Path) -> None:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            self._word_freq = {}
+            self._max_word_freq = 0
+            return
+        # data expected as {word: count}
+        self._word_freq = {w: int(c) for w, c in data.items()}
+        self._max_word_freq = max(self._word_freq.values()) if self._word_freq else 0
 
     # ── Training ──────────────────────────────────────────────────────────────
 

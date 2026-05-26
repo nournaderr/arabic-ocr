@@ -319,6 +319,11 @@ _LETTER_ALIASES: dict[str, str] = {
     "Ba":    "Baa",    # ب
     "Ta":    "Taa",    # ت
     "Tha":   "Thaa",   # ث
+    "Gem":   "Jeem",   # ج (Egyptian G)
+    "Gen":   "Ghain",  # غ
+    "Ha":    "Haa",    # ح
+    "Kha":   "Khaa",   # خ
+    "Tha":   "Thaa",   # ث
     "Jim":   "Jeem",   # ج
     "Ha":    "Heh",    # ه (glottal H; Ha_* and Haa_* are separate classes in this dataset)
     "Kha":   "Khaa",   # خ
@@ -340,7 +345,7 @@ _LETTER_ALIASES: dict[str, str] = {
     # ── Dataset-specific spellings seen in the wild ───────────────────────────
     "Alf":    "Alef",  # ا — "Alf" used in some Egyptian datasets
     "Zal":    "Thal",  # ذ — "Zal" (Zain+Alef) is a common alt. transliteration
-    "Gen":    "Jeem",  # ج — Egyptian pronunciation is "g"; some datasets use "Gen"
+    "Gen":    "Ghain", # غ
     "Geem":   "Jeem",  # ج — same reason
     "Kha":    "Khaa",  # خ — already above, kept for clarity
     "Dha":    "Dhaa",  # ظ
@@ -402,7 +407,7 @@ _DOT_COUNT_ALIASES: dict[str, str] = {
     "Sad": "Saad", "Dad": "Daad", "Tah": "Ttaa", "Zah": "Dhaa",
     "Fa": "Faa", "Qaf": "Qaaf", "Mim": "Meem", "Mem": "Meem",
     "Nun": "Noon", "Ya": "Yaa", "Ye": "Yaa", "Alf": "Alef",
-    "Zal": "Thal", "Dhal": "Thal", "Gen": "Jeem", "Geem": "Jeem",
+    "Zal": "Thal", "Dhal": "Thal", "Gen": "Ghain", "Geem": "Jeem",
     "Gem": "Jeem", "Shen": "Sheen", "Zin": "Zain", "Yaa_Dot": "Yaa",
     "Yeh": "Yaa", "Non": "Noon", "Wow": "Waw", "Kef": "Kaf",
     "Laam": "Lam", "Dha": "Dhaa",

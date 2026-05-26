@@ -8,7 +8,7 @@ from .deskew import deskew
 from .filter import filter_noise
 
 
-_MIN_HEIGHT = 400  # minimum image height for reliable OCR segmentation
+_MIN_HEIGHT = 300  # minimum image height for reliable OCR segmentation
 
 
 def _upscale(img: np.ndarray) -> np.ndarray:

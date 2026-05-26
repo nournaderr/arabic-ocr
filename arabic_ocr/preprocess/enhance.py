@@ -15,11 +15,6 @@ def enhance(img: np.ndarray) -> np.ndarray:
     else:
         gray = img.copy()
 
-    # Bilateral filter: removes scanner grain, preserves stroke edges.
-    # d=9 neighbourhood, sigmaColor/Space=75 — safe defaults for 300 dpi scans.
-    denoised = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
-
-    # clipLimit=3.0 (up from 2.0): scanned docs have stronger illumination
-    # gradients than photos, so we allow more local contrast amplification.
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    return clahe.apply(denoised)
+    # Preserve stroke width on already-clean scans.  The previous bilateral +
+    # CLAHE combination was making the glyphs look heavier before thresholding.
+    return gray

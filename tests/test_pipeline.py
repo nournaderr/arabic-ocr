@@ -80,6 +80,39 @@ class TestPipelineIntegration:
         for r in results:
             assert isinstance(r, str)
 
+    def test_candidate_filter_fallback_keeps_original_candidates(self):
+        from arabic_ocr.pipeline import _filter_candidates_with_fallback
+
+        candidates = [("Baa_Start", 0.9), ("Alf_Start", 0.1)]
+        result = _filter_candidates_with_fallback(
+            candidates,
+            position="initial",
+            dots_above=0,
+            dots_below=1,
+        )
+
+        assert result == candidates
+
+    def test_pipeline_handles_classifier_exception(self):
+        # Build a real pipeline object but inject a classifier that raises
+        from arabic_ocr.pipeline import ArabicOCRPipeline
+        pipe = ArabicOCRPipeline.__new__(ArabicOCRPipeline)
+        class BrokenClassifier:
+            def predict_batch(self, imgs, dots=None):
+                raise RuntimeError("classifier crashed")
+        pipe.classifier = BrokenClassifier()
+        pipe.lm = None
+        pipe.debug = False
+
+        # Create a simple synthetic image with one line so segmentation yields crops
+        import numpy as np
+        img = np.full((60, 200, 3), 255, dtype=np.uint8)
+        img[10:50, 20:180] = 0
+
+        # Should not raise — postprocess will receive undetected candidates and return ""
+        result = pipe.run_array(img)
+        assert isinstance(result, str)
+
 
 class TestArabicUtils:
     def test_is_arabic_char(self):
